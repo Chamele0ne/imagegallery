@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
 import React, { useEffect, useRef, useState } from 'react'
+import { useHistory } from 'react-router-dom'
 import { saveAs } from 'file-saver';
 
 export const Gallery = () => {
@@ -8,8 +9,9 @@ export const Gallery = () => {
     let store;
     let openRequest;
     let transaction;
+    let dbVersion;
     const fileRef = useRef(null)
-
+    const history = useHistory()
     const [volume, setVolume] = useState({ empty: '', engaged: '' })
     const [flag, setFlag] = useState(false)
     const [state, setState] = useState([])
@@ -18,8 +20,8 @@ export const Gallery = () => {
     const [search, setSearch] = useState('')
     const [discription, setDiscription] = useState('')
     const [flagDiscription, setFlagDiscription] = useState(false)
-
-    async function navStorage() {
+    const [stores, setStores] = useState([])
+    function navStorage() {
         if (navigator.storage && navigator.storage.estimate) {
             return async function () {
                 const quota = await navigator.storage.estimate()
@@ -38,7 +40,9 @@ export const Gallery = () => {
     }, [state])
 
     function refreshImages() {
-        openRequest = indexedDB.open('DatabaseImages', 1)
+        dbVersion = window.localStorage.getItem('dbVersion')
+        if (!dbVersion) { window.localStorage.setItem('dbVersion', 1) }
+        openRequest = indexedDB.open('DatabaseImages', dbVersion)
         openRequest.onupgradeneeded = () => {
             db = openRequest.result;
             if (!db.objectStoreNames.contains('images')) {
@@ -46,23 +50,23 @@ export const Gallery = () => {
             }
         }
         openRequest.onerror = (e) => {
-            console.log(e.message)
+            console.log(e)
         }
-        openRequest.onsuccess = async () => {
+        openRequest.onsuccess = (e) => {
             db = openRequest.result;
             transaction = db.transaction('images', 'readwrite')
             store = transaction.objectStore('images')
             store.getAll().onsuccess = function (event) {
                 setState([...event.target.result])
             }
-
+            let values = Object.values(e.target.result.objectStoreNames)
+            setStores(values)
         }
-        return { state }
     }
 
     useEffect(() => {
         refreshImages()
-    }, [])
+    },[])
 
     function getSize(event) {
 
@@ -114,11 +118,11 @@ export const Gallery = () => {
         if (fileRef.current) {
             let reader = new FileReader()
             reader.readAsDataURL(fileRef.current)
-            reader.onload = (event) => {
-                openRequest = indexedDB.open('DatabaseImages', 1)
+            reader.onload = () => {
+                dbVersion = window.localStorage.getItem('dbVersion')
+                openRequest = indexedDB.open('DatabaseImages', dbVersion || 1)
                 openRequest.onsuccess = () => {
                     db = openRequest.result
-                    console.log('Получили файл и создаем транзакцию')
                     transaction = db.transaction('images', 'readwrite')
                     const { obj } = objectToPost(reader.result)
                     store = transaction.objectStore('images').put(obj)
@@ -131,27 +135,25 @@ export const Gallery = () => {
 
     function removeHandler(event, item) {
         event.preventDefault()
-        openRequest = indexedDB.open('DatabaseImages', 1)
+        dbVersion = window.localStorage.getItem('dbVersion')
+        openRequest = indexedDB.open('DatabaseImages', dbVersion || 1)
         openRequest.onsuccess = () => {
             db = openRequest.result
             let transaction = db.transaction('images', 'readwrite')
             let store = transaction.objectStore('images')
             store.delete(item.name)
-
-            console.log('Успешно удалено')
             refreshImages()
         }
-
     }
 
     function changeHandler(event, item) {
-        console.log(item)
         event.preventDefault()
         if (fileRef.current) {
             let reader = new FileReader()
             reader.readAsDataURL(fileRef.current)
-            reader.onload = (event) => {
-                openRequest = indexedDB.open('DatabaseImages', 1)
+            reader.onload = () => {
+                dbVersion = window.localStorage.getItem('dbVersion')
+                openRequest = indexedDB.open('DatabaseImages', dbVersion || 1)
                 openRequest.onsuccess = () => {
                     db = openRequest.result
                     transaction = db.transaction('images', 'readwrite')
@@ -164,7 +166,7 @@ export const Gallery = () => {
                 }
             }
         } else {
-            openRequest = indexedDB.open('DatabaseImages', 1)
+            openRequest = indexedDB.open('DatabaseImages', dbVersion || 1)
             openRequest.onsuccess = () => {
                 db = openRequest.result
                 transaction = db.transaction('images', 'readwrite')
@@ -179,7 +181,8 @@ export const Gallery = () => {
 
     function clearHandler(event) {
         event.preventDefault()
-        openRequest = indexedDB.open('DatabaseImages', 1)
+        dbVersion = window.localStorage.getItem('dbVersion')
+        openRequest = indexedDB.open('DatabaseImages', dbVersion || 1)
         openRequest.onsuccess = () => {
             db = openRequest.result;
             transaction = db.transaction('images', 'readwrite')
@@ -194,18 +197,14 @@ export const Gallery = () => {
         event.preventDefault()
         if (search !== '' && state.length) {
             setFlag(true)
-            console.log(state)
             const sort = state.filter(item => item.name.toLowerCase().includes(search.toLowerCase()))
-            console.log(sort)
             setState(sort)
         }
         setSearch('')
-
     }
 
     function dowloadZIP() {
         var zip = new JSZip();
-
         for (let i = 0; i <= state.length - 1; i++) {
             let index = state[i].path.indexOf(',')
             let imageData = state[i].path.slice(index + 1)
@@ -250,15 +249,11 @@ export const Gallery = () => {
             </div>
             <div className='d-flex'
                 style={{ paddingTop: '50px', width: '100%', position: 'relative' }}>
-
-    
-
                 <form encType="multupart/form-data" method="POST"
                     onSubmit={(event) => submitHandler(event)}
                     style={{ width: '50%' }}
                 >
                     <input
-
                         type='file'
                         className='upload-box'
                         onChange={(event) => {
@@ -275,9 +270,37 @@ export const Gallery = () => {
                             setDiscription('')
                             setFlagDiscription(!flagDiscription)
                         }} >{!flagDiscription ? 'Добавить описание' : 'Убрать'}</button>
+                   
                 </div>
             </div>
-
+            <div className='d-flex pt-4'>
+                 <button className='btn-add' onClick={() => {
+                        history.push('./createCol')
+                        window.location.reload()
+                    }}>Cоздать коллекцию</button>
+            <button  className='btn btn-danger' 
+            onClick={()=>{
+                  history.push('./deleteCol')
+                  window.location.reload()
+                  console.log(stores)
+            }}
+          hidden ={stores.length <= 1 && true}>Удалить коллекицю</button>
+            </div>
+            <div>
+                  <table>
+                <tbody>
+                    <tr className='mt-4 row'>{stores && stores.map((item, index) => item !== 'images' &&
+                        <th key={index} >
+                            <a
+                                href={item}
+                                style = {{minWidth : '100px'}}
+                                className='btn  bg-dark text-white m-1'
+                            >{item}</a>
+                        </th>)}
+                    </tr>
+                </tbody>
+            </table>
+            </div>
             <div style={{ textAlign: 'center' }}>
                 {flagDiscription && <textarea
                     id="discription"
